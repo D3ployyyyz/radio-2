@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Rádio Online</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #121212;
+            color: white;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+        }
+        h1 {
+            margin-top: 50px;
+        }
+        .container {
+            margin-top: 20px;
+        }
+        .radio-status {
+            font-size: 18px;
+            margin: 20px 0;
+        }
+        .musica-info {
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        .album-cover {
+            margin: 20px 0;
+            max-width: 300px;
+            max-height: 300px;
+            border-radius: 10px;
+        }
+        /* --------------- ALTERAÇÃO: ESCONDER O PLAYER --------------- */
+        #audio-player {
+            display: none; /* Esconde completamente o elemento <audio> */
+        }
+    </style>
+</head>
+<body>
+    <h1>Bem-vindo à Rádio Online!</h1>
+    <div class="container">
+
+        <div class="radio-status">
+            <!-- Ex.: “Estilo: nu-metal | Tocando há 02:15” -->
+            <p id="status">Carregando status da rádio...</p>
+        </div>
+
+        <div class="musica-info">
+            <!-- Capa do álbum (ou placeholder) -->
+            <img id="capa" src="https://via.placeholder.com/300?text=Sem+Capa"
+                 alt="Capa do álbum"
+                 style="width:300px;height:auto; border-radius:8px;"
+            />
+            <p id="musica">–</p>
+            <p id="artista">–</p>
+        </div>
+
+        <!-- Player principal (fica invisível, mas sempre ativo em segundo plano) -->
+        <audio id="audio-player">
+            <source id="audio-source" src="" type="audio/mp3" />
+            Seu navegador não suporta áudio.
+        </audio>
+    </div>
+
+    <script>
+        // Ajusta volume máximo (0.0 a 1.0)
+        const audioPlayer = document.getElementById("audio-player");
+        audioPlayer.volume = 1.0;
+
+        // Intervalo de polling em ms (ex.: a cada 5s buscamos status)
+        const POLLING_INTERVAL = 5000;
+
+        // Guarda dados do último status para não “resetar” sem necessidade
+        let ultimoStatus = null;
+
+        // Função que formata segundos → “MM:SS”
+        function formatarTempo(segundos) {
+            const m = Math.floor(segundos / 60).toString().padStart(2, '0');
+            const s = Math.floor(segundos % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+        }
+
+        // Função principal: busca /status e sincroniza o player
+        async function atualizarDoServidor() {
+            try {
+                const resp = await fetch('/status');
+                const data = await resp.json();
+                // Exemplo de data: { tipo, url, nome, artista, capa, estilo, start_time }
+
+                // Calcula “segundos décorridos” desde start_time até agora
+                const inicio = new Date(data.start_time);
+                const agora = new Date();
+                let elapsed = (agora - inicio) / 1000; // em segundos
+
+                if (elapsed < 0) {
+                    elapsed = 0;
+                }
+
+                // Atualiza a exibição de “Estilo | Tocando há MM:SS”
+                const estadoTxt = `${data.estilo} | Tocando há ${formatarTempo(elapsed)}`;
+                document.getElementById("status").textContent = estadoTxt;
+
+                // Se o status mudou (vinheta → música, ou música diferente), reaponta o player
+                const chaveAtual = `${data.tipo}::${data.url}`;
+                if (!ultimoStatus || ultimoStatus !== chaveAtual) {
+                    // Monta o src do <audio>
+                    let srcRel = '/static/' + data.url;
+                    document.getElementById("audio-source").src = srcRel;
+                    audioPlayer.load();
+
+                    // Se for vinheta, mostramos placeholder; se for música, mostramos metadados
+                    if (data.tipo === 'vinheta') {
+                        document.getElementById("capa").src = "https://via.placeholder.com/300?text=Vinheta";
+                        document.getElementById("capa").alt = "Vinheta";
+                        document.getElementById("musica").textContent = "Vinheta...";
+                        document.getElementById("artista").textContent = "";
+                    } else {
+                        document.getElementById("capa").src = data.capa;
+                        document.getElementById("capa").alt = `Capa de ${data.artista}`;
+                        document.getElementById("musica").textContent  = `Música: ${data.nome}`;
+                        document.getElementById("artista").textContent = `Artista: ${data.artista}`;
+                    }
+
+                    // Ajusta o ponto de reprodução para “elapsed” segundos
+                    audioPlayer.currentTime = elapsed;
+                    // Dá play (se já estiver pausado, tocamos)
+                    audioPlayer.play().catch(_=>{/* ignora*/});
+                } else {
+                    // Se não mudou de faixa, apenas ajusta currentTime caso haja drift
+                    if (!audioPlayer.paused) {
+                        const diff = Math.abs(audioPlayer.currentTime - elapsed);
+                        if (diff > 1.0) {
+                            audioPlayer.currentTime = elapsed;
+                        }
+                    }
+                }
+
+                ultimoStatus = chaveAtual;
+            } catch (err) {
+                console.error("Erro ao obter status:", err);
+            }
+        }
+
+        // Ao carregar a página, faz um primeiro fetch e depois polla a cada X ms
+        window.addEventListener('load', () => {
+            atualizarDoServidor();
+            setInterval(atualizarDoServidor, POLLING_INTERVAL);
+        });
+    </script>
+</body>
+</html>
